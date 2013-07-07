@@ -9,7 +9,7 @@
 #include <SoftwareSerial.h>
 #include <avr/pgmspace.h>
 
-#define NODE_ID 0
+#define NODE_ID 1
 #define PICTURE_SIZE VC0706_160x120 // VC0706_640x480, VC0706_320x240, VC0706_160x120
 #define PICTURE_COMPRESSION 250
 #define SLEEP_RADIO
@@ -29,7 +29,7 @@
 #define PIN_RADIO_ENABLE 8
 #define PIN_PIR 2 //Must support Interupt
 #define PIN_PIR_INT 0 //Must be the Interupt for PIN_PIR
-
+  
 static PROGMEM prog_uint32_t CRC[16] = {
     0x00000000, 0x1db71064, 0x3b6e20c8, 0x26d930ac,
     0x76dc4190, 0x6b6b51f4, 0x4db26158, 0x5005713c,
@@ -42,8 +42,9 @@ unsigned long senduntil = 0;
 void radio(const char[12], boolean = false);
 
 void loop() {
-  sleepTillPIR();
-  takePicture();
+  if(sleepTillPIR()) {
+    takePicture();
+  }
 }
 
 void setup() {
@@ -54,32 +55,44 @@ void setup() {
   enableRadio();
   Serial.begin(RADIO_BAUD);
   pinMode(PIN_PIR, INPUT);
+  digitalWrite(PIN_PIR, HIGH);
   delay(500); //Wait to allow OTA programming
   #ifdef DEBUG
     radio("\rPOWER ON   ");
   #endif
 }
 
-void sleepTillPIR() {
-  disableRadio();
+boolean sleepTillPIR() {
   if(digitalRead(PIN_PIR)==LOW) {
+    disableRadio();
+    disableCamera();
     #ifdef SLEEP
+      set_sleep_mode(SLEEP_MODE_PWR_DOWN);
       sleep_enable();
-      attachInterrupt(PIN_PIR_INT, pirDetect, HIGH);
+      attachInterrupt(PIN_PIR_INT, pirDetect, HIGH);  
       set_sleep_mode(SLEEP_MODE_PWR_DOWN);
       cli();
       sei();
       sleep_cpu();
       //Wait for PIR
       sleep_disable();
+      if(digitalRead(PIN_PIR)==LOW) {
+         return false;
+      }
     #else
       //poll
       while(!digitalRead(PIN_PIR)) {
         delay(1000);
       }
     #endif
+    enableCamera();
+    enableRadio();
+  } else {
+    #ifdef DEBUG
+      radio("\rNOSLEEP  ");
+    #endif
   }
-  enableRadio();
+  return true;
 }  
 
 void pirDetect(void) {
@@ -90,12 +103,14 @@ void pirDetect(void) {
 void enableCamera() {
   #ifdef SLEEP_CAMERA
     digitalWrite(PIN_CAMERA_POWER, HIGH);
+    delay(200);
   #endif
 }
 
 void disableCamera() {
   #ifdef SLEEP_CAMERA
     digitalWrite(PIN_CAMERA_POWER, LOW);
+    delay(2000);//Or the PIR just triggers anyway
   #endif
 }
 
@@ -120,7 +135,6 @@ void disableRadio() {
 }
 
 void takePicture() {
-  enableCamera();
   SoftwareSerial cameraSerial = SoftwareSerial(PIN_CAMERA_TX, PIN_CAMERA_RX);
   Adafruit_VC0706 camera = Adafruit_VC0706(&cameraSerial);
   if(!camera.begin()) {
@@ -172,7 +186,6 @@ void takePicture() {
   crc = ~crc;
   sprintf(buf,"CHK%08lx\x17", crc);
   radio(buf);
-  disableCamera();
   radio("\rSLEEPING..."); //HACK: This last packet is unreliable so make it unimportant ;-)
 }
 
@@ -190,29 +203,9 @@ void radio(const char packet[12], boolean drop) {
         }
         buf[11] = Serial.read();
         if(
-          buf[0]==5
+          buf[0]==5 && buf[2]==5 && buf[4]==5 && buf[6]==5 && buf[8]==5 && buf[10]==5
         &&
-          buf[2]==5
-        &&
-          buf[4]==5
-        &&
-          buf[6]==5
-        &&
-          buf[8]==5
-        &&
-          buf[10]==5
-        &&
-          buf[1]==NODE_ID
-        &&
-          buf[3]==NODE_ID
-        &&
-          buf[5]==NODE_ID
-        &&
-          buf[7]==NODE_ID
-        &&
-          buf[9]==NODE_ID
-        &&
-          buf[11]==NODE_ID
+          buf[1]==NODE_ID && buf[3]==NODE_ID && buf[5]==NODE_ID && buf[7]==NODE_ID && buf[9]==NODE_ID && buf[11]==NODE_ID
         ) {
           senduntil = millis() + RADIO_SLOT;
           Serial.write((const uint8_t*)"\x06\x06\x06\x06\x06\x06\x06\x06\x06\x06\x06\x06", 12);

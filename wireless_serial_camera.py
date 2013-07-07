@@ -1,8 +1,7 @@
 #! /usr/bin/python2.7 -OO
 # -*- coding: utf-8 -*-
 """
-Copyright 2013 Barnaby Shearer <b@Zi.iS>, Gary Fletcher <garygfletcher@hotmail.com>
-License GPLv2
+Test Pi's performance
 """
 
 import sys
